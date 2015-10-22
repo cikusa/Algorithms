@@ -5,6 +5,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Data.Maybe
 import Data.Foldable
+import Data.Word
 
 import Control.Monad
 import Control.Monad.Random
@@ -83,7 +84,7 @@ finalPosition dirs m =
     step x y (d:ds) =
       case mazeAt nx ny m of
         MazeObstacle -> step x y ds
-        MazeExit  -> (nx, ny)
+        MazeExit -> (nx, ny)
         _ -> step nx ny ds
       where
         (nx, ny) = move x y d
@@ -142,7 +143,7 @@ defaultGASettings :: GASettings
 defaultGASettings = GASettings
   { crossoverRate  = 0.7
   , mutationRate   = 0.001
-  , maxPoplulation = 140 }
+  , maxPoplulation = 280 }
 
 rouletteWheelSelection :: (FiniteBits a, MonadRandom m) => [(a, Double)] -> Double -> m a
 rouletteWheelSelection gs totalScore = do
@@ -205,8 +206,8 @@ epoch s gs = do
 main :: IO ()
 main = do
   genomes <- take (maxPoplulation defaultGASettings) <$> getRandoms
-  res <- loop (genomes :: [Int])
-  print res
+  res <- loop (genomes :: [Word64])
+  print $ decodeGenome res
   where
     loop gs = do
       res <- epoch defaultGASettings gs
