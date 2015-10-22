@@ -82,9 +82,9 @@ finalPosition dirs m =
     step x y [] = (x, y)
     step x y (d:ds) =
       case mazeAt nx ny m of
-        MazeEmpty -> step nx ny ds
-        MazeExit  -> (x, y)
-        _ -> step x y ds
+        MazeObstacle -> step x y ds
+        MazeExit  -> (nx, ny)
+        _ -> step nx ny ds
       where
         (nx, ny) = move x y d
     move x y dir =
@@ -205,9 +205,11 @@ epoch s gs = do
 main :: IO ()
 main = do
   genomes <- take (maxPoplulation defaultGASettings) <$> getRandoms
-
-  Right res <- epoch defaultGASettings (genomes :: [Int])
-  Right res <- epoch defaultGASettings res
-
-  printMaze mazeMap
-  print $ finalPosition (decodeGenome (0xFFFFFFFFFFFFFFFF :: Word)) mazeMap
+  res <- loop (genomes :: [Int])
+  print res
+  where
+    loop gs = do
+      res <- epoch defaultGASettings gs
+      case res of
+        Right offsprings -> loop offsprings
+        Left  solution   -> return solution
