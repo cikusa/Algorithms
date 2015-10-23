@@ -4,11 +4,6 @@ import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as Map
-
-import Data.Foldable
-import Data.Word
 import Data.Function
 import Data.Maybe
 
