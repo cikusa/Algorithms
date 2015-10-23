@@ -158,7 +158,7 @@ rouletteWheelSelection gs totalScore = do
 crossover :: (Bounded a, FiniteBits a, MonadRandom m) => GASettings -> a -> a -> m (a, a)
 crossover s f m = do
   rf <- getRandomR (0, 1)
-  if rf > rate || f == m
+  if rf > rate
     then return (f, m)
     else do
       splitPos <- getRandomR (0, finiteBitSize f - 1)
@@ -177,10 +177,7 @@ mutate s g = foldM mutateBit g [0..finiteBitSize g - 1]
     rate = mutationRate s
 
 mapPairM :: (Monad m) => (a -> m b) -> (a, a) -> m (b, b)
-mapPairM f (a, b) = do
-  m <- f a
-  n <- f b
-  return (m, n)
+mapPairM f (a, b) = (,) <$> f a <*> f b
 
 concatTuple :: [(a, a)] -> [a]
 concatTuple [] = []
@@ -201,7 +198,9 @@ epoch s gs = do
     makeBaby = do
       father <- rouletteWheelSelection combined totalScore
       mother <- rouletteWheelSelection combined totalScore
-      crossover s father mother >>= mapPairM (mutate s)
+      if father == mother
+        then makeBaby
+        else crossover s father mother >>= mapPairM (mutate s)
 
 main :: IO ()
 main = do
