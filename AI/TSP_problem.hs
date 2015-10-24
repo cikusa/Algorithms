@@ -32,7 +32,9 @@ type CityMap = Vector City
 type Genome  = Vector Int
 
 tourDistance :: Genome -> CityMap -> Double
-tourDistance g m = snd $ V.foldl' go (startCity, 0) g
+tourDistance g m = 
+    let (lastCity, dis) = V.foldl' go (startCity, 0) g
+    in dis + cityDistance lastCity startCity
   where
     go (lastCity, acc) index =
       if lastCity == startCity
@@ -47,8 +49,8 @@ type Rate = Double
 data GASettings = GASettings
   { crossoverRate  :: Rate
   , mutationRate   :: Rate
-  , maxPoplulation :: Int }
-  deriving (Show)
+  , maxPoplulation :: Int
+  , cityMapData    :: CityMap }
 
 rouletteWheelSelection :: (MonadRandom m) => [(Genome, Double)] -> Double -> m Genome
 rouletteWheelSelection gs totalScore = do
@@ -99,17 +101,6 @@ mutate s g = do
         V.unsafeFreeze mv
   where rate = mutationRate s
 
-cityMap :: CityMap
-cityMap = V.fromList
-  [ City 0 (0,  0)
-  , City 1 (10, 0)
-  , City 2 (5, 0)
-  , City 3 (2, 0)
-  , City 4 (7, 0)
-  , City 5 (108, 0)
-  , City 6 (10, 0)
-  , City 7 (12, 0) ]
-
 mapPairM :: (Monad m) => (a -> m b) -> (a, a) -> m (b, b)
 mapPairM f (a, b) = (,) <$> f a <*> f b
 
@@ -122,24 +113,19 @@ maxCombined g1@(_, s1) g2@(_, s2)
   | s1 > s2 = g1
   | otherwise = g2
 
-defaultGASettings :: GASettings
-defaultGASettings = GASettings
-  { crossoverRate  = 0.75
-  , mutationRate   = 0.1
-  , maxPoplulation = 280 }
-
 epoch :: GASettings -> [Genome] -> IO (Either Genome [Genome])
 epoch s gs = do
   print shortestDis
-  if shortestDis < 20
+  if shortestDis < 195
     then return $ Left $ fst $ foldr1 maxCombined combined
     else do
       offsprings <- concatTuple <$> replicateM (maxPoplulation s `div` 2) makeBaby
       return $ Right offsprings
   where
-    tourDistances = fmap (flip tourDistance cityMap) gs
-    longestDis  = foldr1 max tourDistances
-    shortestDis = foldr1 min tourDistances
+    cityMap = cityMapData s
+    tourDistances = fmap (`tourDistance` cityMap) gs
+    longestDis  = maximum tourDistances
+    shortestDis = minimum tourDistances
 
     scores = map (longestDis-) tourDistances
     totalScore = sum scores
@@ -148,21 +134,36 @@ epoch s gs = do
     makeBaby = do
       father <- rouletteWheelSelection combined totalScore
       mother <- rouletteWheelSelection combined totalScore
-      crossover s father mother >>= mapPairM (mutate s)
+      if father == mother
+        then makeBaby
+        else crossover s father mother >>= mapPairM (mutate s)
 
 main :: IO ()
 main = do
-  genomes <- getRandomLists $ maxPoplulation defaultGASettings
-  res <- loop genomes
-  print res
-  where
-    getRandomLists :: (MonadRandom m) => Int -> m [Genome]
-    getRandomLists 0 = return []
-    getRandomLists i = do
-      rl <- shuffleM [0..V.length cityMap - 1]
-      (V.fromList rl :) <$> (getRandomLists $ i - 1)
+  dataLines <- lines <$> readFile "att532.tsp"
+  let cityMap = V.fromList $ map (toCity . words) dataLines
+
+  let {
+    defs = GASettings
+      { crossoverRate  = 0.75
+      , mutationRate   = 0.05
+      , maxPoplulation = 50
+      , cityMapData = cityMap }
+    ;
     loop gs = do
-      res <- epoch defaultGASettings gs
+      res <- epoch defs gs
       case res of
         Right offsprings -> loop offsprings
         Left  solution   -> return solution
+    ;
+    getRandomLists 0 = return [];
+    getRandomLists i = do
+      rl <- shuffleM [0..V.length cityMap - 1]
+      (V.fromList rl :) <$> getRandomLists (i - 1)
+  }
+  genomes <- getRandomLists $ maxPoplulation defs
+  res <- loop genomes
+  print res
+  where
+    toCity (ident:x:y:_) = City (read ident) (read x, read y)
+    toCity _ = undefined
