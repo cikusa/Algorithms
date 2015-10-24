@@ -134,9 +134,7 @@ epoch s gs = do
     makeBaby = do
       father <- rouletteWheelSelection combined totalScore
       mother <- rouletteWheelSelection combined totalScore
-      if father == mother
-        then makeBaby
-        else crossover s father mother >>= mapPairM (mutate s)
+      crossover s father mother >>= mapPairM (mutate s)
 
 main :: IO ()
 main = do
