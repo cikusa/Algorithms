@@ -127,7 +127,7 @@ epoch s gs = do
     longestDis  = maximum tourDistances
     shortestDis = minimum tourDistances
 
-    scores = map (longestDis-) tourDistances
+    scores = map (\a -> longestDis - a + 1) tourDistances
     totalScore = sum scores
     combined = zip gs scores
 
@@ -144,7 +144,7 @@ main = do
   let {
     defs = GASettings
       { crossoverRate  = 0.75
-      , mutationRate   = 0.05
+      , mutationRate   = 0.1
       , maxPoplulation = 50
       , cityMapData = cityMap }
     ;
