@@ -3,11 +3,12 @@ module Main where
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
+import qualified Data.Vector.Algorithms.Intro as VA
 
 import Data.Function
 import Data.Maybe
+import Data.List
 
-import Control.Monad
 import Control.Monad.Random
 import Control.Monad.ST.Strict
 
@@ -62,6 +63,13 @@ rouletteWheelSelection gs totalScore = do
       | otherwise = go slice (acc + score) gss
     go _ _ [] = undefined
 
+tournamentSelection :: (MonadRandom m) => Vector (Genome, Double) -> m Genome
+tournamentSelection gs = do
+  selecteds <- take n <$> getRandomRs (0, V.length gs - 1)
+  return $ fst $ maximumBy (compare `on` snd) $ map (gs V.!) selecteds
+  where
+    n = 10
+
 -- Partially-mapped crossover algorithm
 crossover :: (MonadRandom m) => GASettings -> Genome -> Genome -> m (Genome, Genome)
 crossover s f m = do
@@ -104,22 +112,48 @@ mutate s g = do
 mapPairM :: (Monad m) => (a -> m b) -> (a, a) -> m (b, b)
 mapPairM f (a, b) = (,) <$> f a <*> f b
 
-concatTuple :: [(a, a)] -> [a]
-concatTuple [] = []
-concatTuple ((a, b):xs) = a : b : concatTuple xs
+concatTuple :: Vector (a, a) -> Vector a
+concatTuple v = let (l, r) = V.unzip v in V.concat [l, r]
 
 maxCombined :: (Genome, Double) -> (Genome, Double) -> (Genome, Double)
 maxCombined g1@(_, s1) g2@(_, s2)
   | s1 > s2 = g1
   | otherwise = g2
-
-epoch :: GASettings -> [Genome] -> IO (Either Genome [Genome])
-epoch s gs = do
+  
+boltzmannEpoch :: GASettings -> Double -> Vector Genome -> IO (Either Genome (Vector Genome, Double))
+boltzmannEpoch s t gs = do
   print shortestDis
   if shortestDis < 195
     then return $ Left $ fst $ foldr1 maxCombined combined
     else do
-      offsprings <- concatTuple <$> replicateM (maxPoplulation s `div` 2) makeBaby
+      offsprings <- concatTuple <$> V.replicateM (maxPoplulation s `div` 2) makeBaby
+      return $ Right (offsprings, t - 0.00001)
+  where
+    cityMap = cityMapData s
+    tourDistances = fmap (`tourDistance` cityMap) gs
+    longestDis  = maximum tourDistances
+    shortestDis = minimum tourDistances
+
+    scores       = fmap (\a -> longestDis - a + 1) tourDistances
+    scoreNum     = fromIntegral $ V.length scores
+    totalScore   = sum scores
+    averageScore = totalScore / scoreNum
+
+    newScores = V.map (\x -> (x / t) / (averageScore / t)) scores
+    combined = V.zip gs newScores
+
+    makeBaby = do
+      father <- tournamentSelection combined
+      mother <- tournamentSelection combined
+      crossover s father mother >>= mapPairM (mutate s)
+
+sigmaedEpoch :: GASettings -> Vector Genome -> IO (Either Genome (Vector Genome))
+sigmaedEpoch s gs = do
+  print shortestDis
+  if shortestDis < 195
+    then return $ Left $ fst $ foldr1 maxCombined combined
+    else do
+      offsprings <- concatTuple <$> V.replicateM (maxPoplulation s `div` 2) makeBaby
       return $ Right offsprings
   where
     cityMap = cityMapData s
@@ -127,13 +161,53 @@ epoch s gs = do
     longestDis  = maximum tourDistances
     shortestDis = minimum tourDistances
 
-    scores = map (\a -> longestDis - a + 1) tourDistances
-    totalScore = sum scores
-    combined = zip gs scores
+    scores       = fmap (\a -> longestDis - a + 1) tourDistances
+    scoreNum     = fromIntegral $ V.length scores
+    totalScore   = sum scores
+    averageScore = totalScore / scoreNum
+    standardDev  = V.sum (V.map (\x -> (x - averageScore) ** 2) scores) / scoreNum
+
+    sigmaed =
+      if averageScore == 0
+        then V.map (const 1) scores
+        else V.map (\x -> (x - averageScore) / (2 * standardDev)) scores
+    combined = V.zip gs sigmaed
 
     makeBaby = do
-      father <- rouletteWheelSelection combined totalScore
-      mother <- rouletteWheelSelection combined totalScore
+--      father <- rouletteWheelSelection combined totalScore
+--      mother <- rouletteWheelSelection combined totalScore
+      father <- tournamentSelection combined
+      mother <- tournamentSelection combined
+      crossover s father mother >>= mapPairM (mutate s)
+
+rankedEpoch :: GASettings -> Vector Genome -> IO (Either Genome (Vector Genome))
+rankedEpoch s gs = do
+  print shortestDis
+  if shortestDis < 195
+    then return $ Left $ fst $ foldr1 maxCombined combined
+    else do
+      sorted <- do 
+        mv <- V.unsafeThaw combined
+        VA.sortBy (compare `on` snd) mv
+        V.unsafeFreeze mv
+      let ranked = V.imap (\i (g, _) -> (g, fromIntegral i)) sorted
+      offsprings <- concatTuple <$> V.replicateM (maxPoplulation s `div` 2) (makeBaby ranked)
+      return $ Right offsprings
+  where
+    cityMap = cityMapData s
+    tourDistances = fmap (`tourDistance` cityMap) gs
+    longestDis  = maximum tourDistances
+    shortestDis = minimum tourDistances
+
+    scores = fmap (1/) tourDistances
+--    totalScore = sum scores
+    combined = V.zip gs scores
+
+    makeBaby gens = do
+--      father <- rouletteWheelSelection combined totalScore
+--      mother <- rouletteWheelSelection combined totalScore
+      father <- tournamentSelection gens
+      mother <- tournamentSelection gens
       crossover s father mother >>= mapPairM (mutate s)
 
 main :: IO ()
@@ -144,14 +218,20 @@ main = do
   let {
     defs = GASettings
       { crossoverRate  = 0.75
-      , mutationRate   = 0.1
+      , mutationRate   = 0.2
       , maxPoplulation = 50
       , cityMapData = cityMap }
     ;
-    loop gs = do
-      res <- epoch defs gs
+    {-loop gs = do
+      res <- sigmaedEpoch defs gs
       case res of
         Right offsprings -> loop offsprings
+        Left  solution   -> return solution
+    ;-}
+    loop t gs = do
+      res <- boltzmannEpoch defs t gs
+      case res of
+        Right (offsprings, temp) -> loop temp offsprings
         Left  solution   -> return solution
     ;
     getRandomLists 0 = return [];
@@ -160,7 +240,7 @@ main = do
       (V.fromList rl :) <$> getRandomLists (i - 1)
   }
   genomes <- getRandomLists $ maxPoplulation defs
-  res <- loop genomes
+  res <- loop 10 $ V.fromList genomes
   print res
   where
     toCity (ident:x:y:_) = City (read ident) (read x, read y)
